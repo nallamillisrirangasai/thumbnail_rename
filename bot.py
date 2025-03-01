@@ -1,143 +1,55 @@
-from pyrogram import Client, filters, idle
-import os
-from flask import Flask
-from threading import Thread
+import asyncio
+import threading
+import uuid
+import redis
+from flask import Flask, jsonify
+from pyrogram import Client
+from pyrogram.types import Message
 
-# Load environment variables
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+app = Flask(__name__)
 
-# Initialize Pyrogram Client with optimizations
-app = Client(
-    "bulk_thumbnail_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    workers=10,  # More workers for parallel processing
-    sleep_threshold=5  # Reduces sleep delay
-)
+# Connect to Redis (store progress even if the app restarts)
+redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
 
-# Flask app to keep Render alive
-web_app = Flask(__name__)  # Fixed typo
+# Initialize Telegram bot (replace with your own API_ID, API_HASH, BOT_TOKEN)
+API_ID = 123456  # Replace with your actual API ID
+API_HASH = "your_api_hash"  # Replace with your actual API HASH
+BOT_TOKEN = "your_bot_token"  # Replace with your bot token
 
-@web_app.route('/')
-def home():
-    return "Bot is running!"
+bot = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Directory to save thumbnails and keywords
-THUMB_DIR = "thumbnails"
-KEYWORDS_FILE = "keywords.txt"
-os.makedirs(THUMB_DIR, exist_ok=True)
+async def progress_task(user_id):
+    """Async function to update progress."""
+    for i in range(1, 11):
+        await asyncio.sleep(1)  # Simulate work
+        redis_client.set(user_id, i * 10)  # Store in Redis
+    redis_client.set(user_id, 100)  # Completion
 
-# Load user keywords from file
-user_keywords = {}
+@app.route("/start-progress", methods=["POST"])
+def start_progress():
+    """Starts progress and returns user ID."""
+    user_id = str(uuid.uuid4())  # Generate a unique user ID
+    redis_client.set(user_id, 0)  # Initialize progress
 
-if os.path.exists(KEYWORDS_FILE):
-    with open(KEYWORDS_FILE, "r") as f:
-        for line in f:
-            user_id, keyword = line.strip().split(":", 1)
-            user_keywords[int(user_id)] = keyword
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=lambda: asyncio.run(progress_task(user_id)), daemon=True).start()
 
-# Save user keywords
-def save_keywords():
-    with open(KEYWORDS_FILE, "w") as f:
-        for user_id, keyword in user_keywords.items():
-            f.write(f"{user_id}:{keyword}\n")
+    return jsonify({"message": "Progress started!", "user_id": user_id})
 
-# Progress function
-async def progress(current, total, message):
-    percent = (current / total) * 100
-    progress_bar = "▓" * int(percent // 10) + "░" * (10 - int(percent // 10))
-    await message.edit(f"📥 Downloading: {progress_bar} {percent:.2f}%")
+@app.route("/progress/<user_id>")
+def get_progress(user_id):
+    """Returns progress for a specific user."""
+    progress = redis_client.get(user_id) or "User not found"
+    return jsonify({"user_id": user_id, "progress": progress})
 
-# Command to set a custom default keyword
-@app.on_message(filters.command("set_default"))
-async def set_default_keyword(client, message):
-    if len(message.command) < 2:
-        await message.reply_text("⚠ Please provide a default keyword. Example: /set_default @Animes2u")
-        return
+@bot.on_message()
+async def handle_message(client, message: Message):
+    """Handles messages from Telegram users."""
+    user_id = str(message.from_user.id)
+    redis_client.set(user_id, 0)  # Initialize progress
+    asyncio.create_task(progress_task(user_id))
+    await message.reply_text(f"Progress started! Track at: /progress/{user_id}")
 
-    keyword = " ".join(message.command[1:])
-    user_keywords[message.from_user.id] = keyword
-    save_keywords()
-    await message.reply_text(f"✅ Default keyword set to: {keyword}")
-
-# Command to set a thumbnail
-@app.on_message(filters.command("set_thumb") & filters.photo)
-async def set_thumbnail(client, message):
-    file_path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
-    await client.download_media(message.photo, file_name=file_path)
-    await message.reply_text("✅ Thumbnail saved successfully!")
-
-# Command to change the thumbnail and rename the file
-@app.on_message(filters.document)
-async def change_thumbnail(client, message):
-    thumb_path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
-    default_keyword = user_keywords.get(message.from_user.id, "Default")
-
-    if not os.path.exists(thumb_path):
-        await message.reply_text("⚠ No thumbnail found! Send an image with /set_thumb to set one.")
-        return
-
-    progress_msg = await message.reply_text("📥 Downloading file...")
-
-    # Download the document with progress tracking
-    file_path = await message.download(progress=lambda current, total: progress(current, total, progress_msg))
-
-    if not file_path:
-        await message.reply_text("❌ Failed to download file.")
-        return
-
-    try:
-        # Rename the file by adding the user-defined default keyword
-        dir_name, original_filename = os.path.split(file_path)
-        new_filename = f"{default_keyword} {original_filename}"
-        new_file_path = os.path.join(dir_name, new_filename)
-        os.rename(file_path, new_file_path)
-
-        await progress_msg.edit("📤 Uploading file...")
-
-        # Send the renamed document with the new thumbnail and progress
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=new_file_path,
-            thumb=thumb_path,
-            caption=f"✅ File renamed and thumbnail changed: {new_filename}",
-            disable_notification=True,
-            progress=lambda current, total: progress(current, total, progress_msg)
-        )
-
-        await progress_msg.edit("✅ Done! Here is your updated file.")
-    except Exception as e:
-        await progress_msg.edit(f"❌ Failed to process file: {e}")
-
-# Start command
-@app.on_message(filters.command("start"))
-async def start(client, message):
-    await message.reply_text(
-        "👋 Hello! Use /set_default <keyword> to set a custom word before file names.\n"
-        "Send an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail."
-    )
-
-# Run Flask in a separate thread
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    web_app.run(host="0.0.0.0", port=port, threaded=True)  # Multi-threaded Flask
-
-if __name__ == "__main__":  # Fixed typo
-    print("🤖 Bot is starting...")
-
-    # Start Flask server in a separate thread
-    flask_thread = Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    # Start Pyrogram bot
-    app.start()
-    print("✅ Bot is online and ready to receive commands.")
-
-    # Keep bot running and listening to messages
-    idle()
-
-    print("🛑 Bot stopped.")
-    app.stop()
+if __name__ == "__main__":
+    bot.start()
+    app.run(host="0.0.0.0", port=10000, debug=True)
