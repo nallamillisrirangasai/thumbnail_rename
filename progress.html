@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Progress</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        .progress-container {
+            width: 100%;
+            background-color: #ddd;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Live Progress Bar</h2>
+    <button onclick="startProgress()">Start Progress</button>
+    <div class="progress-container">
+        <div class="progress-bar" id="progress-bar">0%</div>
+    </div>
+
+    <script>
+        var socket = io.connect(window.location.origin);
+
+        function startProgress() {
+            fetch('/start-progress', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    let userId = data.user_id;
+                    socket.on("progress", function(msg) {
+                        if (msg.user_id === userId) {
+                            let progress = msg.progress;
+                            document.getElementById('progress-bar').style.width = progress + '%';
+                            document.getElementById('progress-bar').innerText = progress + '%';
+                        }
+                    });
+                });
+        }
+    </script>
+</body>
+</html>
