@@ -3,16 +3,17 @@ import os
 from flask import Flask
 from threading import Thread
 
-# Load environment variables (Set these in Render)
+# Load environment variables
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+DEFAULT_KEYWORD = os.getenv("DEFAULT_KEYWORD", "Default")  # Changeable default word
 
 # Initialize Pyrogram Client
 app = Client("bulk_thumbnail_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Flask app to keep Render alive
-web_app = Flask(_name_)
+web_app = Flask(_name_)  # Fixed typo
 
 @web_app.route('/')
 def home():
@@ -29,7 +30,7 @@ async def set_thumbnail(client, message):
     await client.download_media(message.photo, file_name=file_path)
     await message.reply_text("✅ Thumbnail saved successfully!")
 
-# Command to change the thumbnail of a file
+# Command to change the thumbnail of a file and rename it
 @app.on_message(filters.document)
 async def change_thumbnail(client, message):
     thumb_path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
@@ -38,7 +39,7 @@ async def change_thumbnail(client, message):
         await message.reply_text("⚠ No thumbnail found! Send an image with /set_thumb to set one.")
         return
 
-    await message.reply_text("🔄 Changing thumbnail...")
+    await message.reply_text("🔄 Changing thumbnail and renaming file...")
 
     # Download the document
     file_path = await message.download()
@@ -46,28 +47,29 @@ async def change_thumbnail(client, message):
     if not file_path:
         await message.reply_text("❌ Failed to download file.")
         return
-
+    
     try:
-        # Get original filename and add "Default " at the beginning
-        original_filename = message.document.file_name
-        new_filename = f"Default {original_filename}"
+        # Rename the file by adding the default keyword at the beginning
+        dir_name, original_filename = os.path.split(file_path)
+        new_filename = f"{DEFAULT_KEYWORD} {original_filename}"
+        new_file_path = os.path.join(dir_name, new_filename)
+        os.rename(file_path, new_file_path)
 
-        # Send the document with the new thumbnail and renamed file
+        # Send the renamed document with the new thumbnail
         await client.send_document(
             chat_id=message.chat.id,
-            document=file_path,
+            document=new_file_path,
             thumb=thumb_path,  # Attach the new thumbnail
-            caption=f"✅ Thumbnail changed: {new_filename}",
-            file_name=new_filename
+            caption=f"✅ File renamed and thumbnail changed: {new_filename}",
         )
         await message.reply_text("✅ Done! Here is your updated file.")
     except Exception as e:
-        await message.reply_text(f"❌ Failed to change thumbnail: {e}")
+        await message.reply_text(f"❌ Failed to process file: {e}")
 
 # Start command
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 Hello! Send an image with /set_thumb to set a thumbnail, then send a file to change its thumbnail.")
+    await message.reply_text("👋 Hello! Send an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail.")
 
 # Run Flask in a separate thread
 def run_flask():
