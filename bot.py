@@ -45,6 +45,12 @@ def save_keywords():
         for user_id, keyword in user_keywords.items():
             f.write(f"{user_id}:{keyword}\n")
 
+# Progress function
+async def progress(current, total, message):
+    percent = (current / total) * 100
+    progress_bar = "▓" * int(percent // 10) + "░" * (10 - int(percent // 10))
+    await message.edit(f"📥 Downloading: {progress_bar} {percent:.2f}%")
+
 # Command to set a custom default keyword
 @app.on_message(filters.command("set_default"))
 async def set_default_keyword(client, message):
@@ -74,37 +80,37 @@ async def change_thumbnail(client, message):
         await message.reply_text("⚠ No thumbnail found! Send an image with /set_thumb to set one.")
         return
 
-    await message.reply_text("🔄 Changing thumbnail and renaming file...")
+    progress_msg = await message.reply_text("📥 Downloading file...")
 
-    # Download the document in-memory for speed
-    file_path = await message.download(in_memory=True)
+    # Download the document with progress tracking
+    file_path = await message.download(progress=lambda current, total: progress(current, total, progress_msg))
 
     if not file_path:
         await message.reply_text("❌ Failed to download file.")
         return
-    
+
     try:
-        # Save the file locally
-        dir_name = THUMB_DIR
-        original_filename = message.document.file_name
+        # Rename the file by adding the user-defined default keyword
+        dir_name, original_filename = os.path.split(file_path)
         new_filename = f"{default_keyword} {original_filename}"
         new_file_path = os.path.join(dir_name, new_filename)
+        os.rename(file_path, new_file_path)
 
-        # Write in-memory file to disk
-        with open(new_file_path, "wb") as f:
-            f.write(file_path.getbuffer())
+        await progress_msg.edit("📤 Uploading file...")
 
-        # Send the renamed document with the new thumbnail
+        # Send the renamed document with the new thumbnail and progress
         await client.send_document(
             chat_id=message.chat.id,
             document=new_file_path,
             thumb=thumb_path,
             caption=f"✅ File renamed and thumbnail changed: {new_filename}",
-            disable_notification=True  # Speeds up sending
+            disable_notification=True,
+            progress=lambda current, total: progress(current, total, progress_msg)
         )
-        await message.reply_text("✅ Done! Here is your updated file.")
+
+        await progress_msg.edit("✅ Done! Here is your updated file.")
     except Exception as e:
-        await message.reply_text(f"❌ Failed to process file: {e}")
+        await progress_msg.edit(f"❌ Failed to process file: {e}")
 
 # Start command
 @app.on_message(filters.command("start"))
