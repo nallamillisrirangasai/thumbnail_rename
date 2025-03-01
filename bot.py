@@ -7,21 +7,48 @@ from threading import Thread
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DEFAULT_KEYWORD = os.getenv("DEFAULT_KEYWORD", "Default")  # Changeable default word
 
 # Initialize Pyrogram Client
 app = Client("bulk_thumbnail_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Flask app to keep Render alive
-web_app = Flask(__name__)  # Fixed typo
+web_app = Flask(_name_)
 
 @web_app.route('/')
 def home():
     return "Bot is running!"
 
-# Directory to save thumbnails
+# Directory to save thumbnails and keywords
 THUMB_DIR = "thumbnails"
+KEYWORDS_FILE = "keywords.txt"
 os.makedirs(THUMB_DIR, exist_ok=True)
+
+# Load user keywords from file
+user_keywords = {}
+
+if os.path.exists(KEYWORDS_FILE):
+    with open(KEYWORDS_FILE, "r") as f:
+        for line in f:
+            user_id, keyword = line.strip().split(":", 1)
+            user_keywords[int(user_id)] = keyword
+
+# Save user keywords
+def save_keywords():
+    with open(KEYWORDS_FILE, "w") as f:
+        for user_id, keyword in user_keywords.items():
+            f.write(f"{user_id}:{keyword}\n")
+
+# Command to set a custom default keyword
+@app.on_message(filters.command("set_default"))
+async def set_default_keyword(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("⚠ Please provide a default keyword. Example: /set_default @Animes2u")
+        return
+
+    keyword = " ".join(message.command[1:])
+    user_keywords[message.from_user.id] = keyword
+    save_keywords()
+    await message.reply_text(f"✅ Default keyword set to: {keyword}")
 
 # Command to set a thumbnail
 @app.on_message(filters.command("set_thumb") & filters.photo)
@@ -30,10 +57,11 @@ async def set_thumbnail(client, message):
     await client.download_media(message.photo, file_name=file_path)
     await message.reply_text("✅ Thumbnail saved successfully!")
 
-# Command to change the thumbnail of a file and rename it
+# Command to change the thumbnail and rename the file
 @app.on_message(filters.document)
 async def change_thumbnail(client, message):
     thumb_path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
+    default_keyword = user_keywords.get(message.from_user.id, "Default")
 
     if not os.path.exists(thumb_path):
         await message.reply_text("⚠ No thumbnail found! Send an image with /set_thumb to set one.")
@@ -49,9 +77,9 @@ async def change_thumbnail(client, message):
         return
     
     try:
-        # Rename the file by adding the default keyword at the beginning
+        # Rename the file by adding the user-defined default keyword
         dir_name, original_filename = os.path.split(file_path)
-        new_filename = f"{DEFAULT_KEYWORD} {original_filename}"
+        new_filename = f"{default_keyword} {original_filename}"
         new_file_path = os.path.join(dir_name, new_filename)
         os.rename(file_path, new_file_path)
 
@@ -69,14 +97,14 @@ async def change_thumbnail(client, message):
 # Start command
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 Hello! Send an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail.")
+    await message.reply_text("👋 Hello! Use /set_default <keyword> to set a custom word before file names.\nSend an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail.")
 
 # Run Flask in a separate thread
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     print("🤖 Bot is starting...")
 
     # Start Flask server in a separate thread
