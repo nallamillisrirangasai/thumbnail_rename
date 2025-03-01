@@ -8,8 +8,15 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Initialize Pyrogram Client
-app = Client("bulk_thumbnail_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Initialize Pyrogram Client with optimizations
+app = Client(
+    "bulk_thumbnail_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=10,  # More workers for parallel processing
+    sleep_threshold=5  # Reduces sleep delay
+)
 
 # Flask app to keep Render alive
 web_app = Flask(__name__)  # Fixed typo
@@ -69,26 +76,31 @@ async def change_thumbnail(client, message):
 
     await message.reply_text("🔄 Changing thumbnail and renaming file...")
 
-    # Download the document
-    file_path = await message.download()
-    
+    # Download the document in-memory for speed
+    file_path = await message.download(in_memory=True)
+
     if not file_path:
         await message.reply_text("❌ Failed to download file.")
         return
     
     try:
-        # Rename the file by adding the user-defined default keyword
-        dir_name, original_filename = os.path.split(file_path)
+        # Save the file locally
+        dir_name = THUMB_DIR
+        original_filename = message.document.file_name
         new_filename = f"{default_keyword} {original_filename}"
         new_file_path = os.path.join(dir_name, new_filename)
-        os.rename(file_path, new_file_path)
+
+        # Write in-memory file to disk
+        with open(new_file_path, "wb") as f:
+            f.write(file_path.getbuffer())
 
         # Send the renamed document with the new thumbnail
         await client.send_document(
             chat_id=message.chat.id,
             document=new_file_path,
-            thumb=thumb_path,  # Attach the new thumbnail
+            thumb=thumb_path,
             caption=f"✅ File renamed and thumbnail changed: {new_filename}",
+            disable_notification=True  # Speeds up sending
         )
         await message.reply_text("✅ Done! Here is your updated file.")
     except Exception as e:
@@ -97,12 +109,15 @@ async def change_thumbnail(client, message):
 # Start command
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text("👋 Hello! Use /set_default <keyword> to set a custom word before file names.\nSend an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail.")
+    await message.reply_text(
+        "👋 Hello! Use /set_default <keyword> to set a custom word before file names.\n"
+        "Send an image with /set_thumb to set a thumbnail, then send a file to rename and change its thumbnail."
+    )
 
 # Run Flask in a separate thread
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
-    web_app.run(host="0.0.0.0", port=port)
+    web_app.run(host="0.0.0.0", port=port, threaded=True)  # Multi-threaded Flask
 
 if __name__ == "__main__":  # Fixed typo
     print("🤖 Bot is starting...")
