@@ -33,6 +33,40 @@ async def rename_file(client, message):
 
 app.run()
 
+user_files = {}
+
+@app.on_message(filters.document | filters.video | filters.photo)
+async def rename_file(client, message):
+    user_id = message.from_user.id
+    if user_id not in user_files:
+        user_files[user_id] = []
+    
+    file = message.document or message.video or message.photo
+    user_files[user_id].append(file.file_id)
+
+    await message.reply_text("File added! Send more files or type `/rename all`.")
+
+@app.on_message(filters.command("rename"))
+async def rename_all(client, message):
+    user_id = message.from_user.id
+    if user_id not in user_files or not user_files[user_id]:
+        await message.reply_text("No files to rename.")
+        return
+    
+    await message.reply_text("Send the new name pattern (e.g., file_1.mp4, file_2.jpg).")
+
+    @app.on_message(filters.text)
+    async def get_bulk_name(client, new_msg):
+        name_pattern = new_msg.text
+        for i, file_id in enumerate(user_files[user_id], start=1):
+            file_path = await client.download_media(file_id)
+            new_name = name_pattern.replace("#", str(i))
+            os.rename(file_path, new_name)
+            await message.reply_document(new_name, caption=f"Renamed to {new_name}")
+        
+        user_files[user_id] = []
+
+
 user_thumbnails = {}
 
 @app.on_message(filters.command("setthumb"))
