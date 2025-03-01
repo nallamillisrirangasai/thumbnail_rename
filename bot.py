@@ -12,7 +12,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 app = Client("bulk_thumbnail_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Flask app to keep Render alive
-web_app = Flask(_name_)
+web_app = Flask(__name__)  # Fixed typo
 
 @web_app.route('/')
 def home():
@@ -104,7 +104,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-if _name_ == "_main_":
+if __name__ == "__main__":  # Fixed typo
     print("🤖 Bot is starting...")
 
     # Start Flask server in a separate thread
