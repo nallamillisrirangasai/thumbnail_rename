@@ -1,0 +1,10 @@
+services:
+  - name: flask-telegram-progress
+    type: web
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn -k eventlet -w 1 app:app & python app.py"
+    envVars:
+      - key: PORT
+        value: 10000
