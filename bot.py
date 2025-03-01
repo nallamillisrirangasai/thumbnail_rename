@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()  # Apply monkey patching before any other imports
+
 import asyncio
 import threading
 import uuid
