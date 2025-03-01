@@ -2,3 +2,6 @@ pyrogram
 tgcrypto
 flask
 pillow
+redis
+gunicorn
+eventlet
